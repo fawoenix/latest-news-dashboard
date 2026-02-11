@@ -1,14 +1,19 @@
-# Latest News Dashboard - Complete Documentation
+# Latest News Dashboard — Project Documentation
 
 ## Table of Contents
 
 1. [Project Overview](#1-project-overview)
 2. [Architecture](#2-architecture)
-3. [Installation and Setup](#3-installation-and-setup)
-4. [Database Configuration](#4-database-configuration)
-5. [Caching Configuration](#5-caching-configuration)
-6. [API Documentation](#6-api-documentation)
-7. [Running the Project](#7-running-the-project)
+3. [How to Run the Project](#3-how-to-run-the-project)
+4. [Setup Process](#4-setup-process)
+   - 4.1 [System Requirements](#41-system-requirements)
+   - 4.2 [PostgreSQL Setup](#42-postgresql-setup)
+   - 4.3 [Redis Setup](#43-redis-setup-wsl)
+   - 4.4 [Backend Setup](#44-backend-setup)
+   - 4.5 [Frontend Setup](#45-frontend-setup)
+5. [Database Design and Optimization](#5-database-design-and-optimization)
+6. [Caching Strategy](#6-caching-strategy)
+7. [API Documentation](#7-api-documentation)
 8. [Background Tasks](#8-background-tasks)
 9. [Project Structure](#9-project-structure)
 10. [Troubleshooting](#10-troubleshooting)
@@ -17,426 +22,382 @@
 
 ## 1. Project Overview
 
-### 1.1 Description
+The Latest News Dashboard is a full-stack web application that aggregates and displays news articles fetched from [NewsAPI](https://newsapi.org/). It is designed with a focus on performance through database optimization, response caching, and automated background processing.
 
-The Latest News Dashboard is a production-ready full-stack web application that aggregates news articles from NewsAPI. It demonstrates best practices in building scalable web applications with proper database optimization, caching strategies, and asynchronous task processing.
+**Core capabilities:**
+- Fetches articles across multiple categories from NewsAPI
+- Stores and deduplicates articles in PostgreSQL
+- Serves articles via a RESTful API with filtering, search, and pagination
+- Caches responses in Redis to reduce database load
+- Runs periodic background tasks via Celery to fetch fresh news automatically
+- Displays articles in a responsive Angular frontend
 
-### 1.2 Key Features
+**Technology stack:**
 
-- **Real-time News Aggregation**: Fetches news from multiple categories and sources via NewsAPI
-- **Smart Caching**: Redis-based caching to reduce API calls and database queries
-- **Advanced Search**: Full-text search capabilities with PostgreSQL trigram indexes
-- **Filtering**: Filter by category, source, country, and custom search queries
-- **Pagination**: Efficient pagination for large datasets
-- **Background Processing**: Celery-based periodic tasks for automated news updates
-- **RESTful API**: Well-documented REST API with Swagger/OpenAPI documentation
-- **Modern Frontend**: Responsive Angular interface with real-time updates
-
-### 1.3 Technology Stack
-
-| Layer | Technology | Purpose |
-|-------|------------|---------|
-| Frontend | Angular 19+ | Single-page application framework |
-| Backend | Django 4.x | Web framework |
-| API | Django REST Framework | RESTful API creation |
-| Database | PostgreSQL 14+ | Primary data storage |
-| Cache | Redis 7+ | Caching and session storage |
-| Task Queue | Celery | Asynchronous task processing |
-| Message Broker | Redis | Celery message broker |
-| API Docs | drf-yasg | Swagger/OpenAPI documentation |
+| Layer | Technology |
+|-------|------------|
+| Frontend | Angular 19+ |
+| Backend | Django 4.x, Django REST Framework |
+| Database | PostgreSQL 14+ |
+| Cache and Broker | Redis 7+ |
+| Task Queue | Celery + Celery Beat |
+| API Documentation | drf-yasg (Swagger / ReDoc) |
 
 ---
 
 ## 2. Architecture
 
-### 2.1 System Architecture
-
 ```
-┌─────────────────────────────────────────────────────────┐
-│                  Angular Frontend                        │
-│                  (Port 4200)                             │
-│  - Components                                            │
-│  - Services (HTTP Client)                                │
-│  - Routing                                               │
-└───────────────────────┬─────────────────────────────────┘
-                        │ HTTP/REST
-                        ▼
-┌─────────────────────────────────────────────────────────┐
-│              Django REST API (Port 8000)                 │
-│  ┌───────────────────────────────────────────────────┐  │
-│  │ Views Layer (API Endpoints)                       │  │
-│  └────────────────────┬──────────────────────────────┘  │
-│  ┌────────────────────▼──────────────────────────────┐  │
-│  │ Serializers (Data Validation & Transformation)    │  │
-│  └────────────────────┬──────────────────────────────┘  │
-│  ┌────────────────────▼──────────────────────────────┐  │
-│  │ Services Layer (Business Logic)                   │  │
-│  └────────────────────┬──────────────────────────────┘  │
-│  ┌────────────────────▼──────────────────────────────┐  │
-│  │ Models (ORM)                                       │  │
-│  └────────────────────┬──────────────────────────────┘  │
-├────────────────────────┼──────────────────────────────┤
-│  ┌──────────────┐  ┌──▼────────────┐  ┌──────────────┐  │
-│  │  PostgreSQL  │  │     Redis     │  │    Redis     │  │
-│  │  (Storage)   │  │    (Cache)    │  │   (Broker)   │  │
-│  │              │  │  - API Cache  │  │  - Celery    │  │
-│  │  - Articles  │  │  - Sessions   │  │    Messages  │  │
-│  │  - Metadata  │  │               │  │              │  │
-│  └──────────────┘  └───────────────┘  └──────┬───────┘  │
-└───────────────────────────────────────────────┼─────────┘
-                                                 │
-                        ┌────────────────────────▼─────────┐
-                        │  Celery Worker + Beat Scheduler  │
-                        │  - Periodic News Fetching        │
-                        │  - Data Processing               │
-                        │  - Cleanup Tasks                 │
-                        └──────────────────────────────────┘
+┌─────────────────┐       ┌──────────────────────┐       ┌──────────────┐
+│   Angular App   │──────▶│  Django REST API      │──────▶│  PostgreSQL  │
+│   (port 4200)   │ HTTP  │  (port 8000)          │       │  Database    │
+└─────────────────┘       │                      │       └──────────────┘
+                          │  ┌──────────────┐    │
+                          │  │ Redis Cache   │    │       ┌──────────────┐
+                          │  └──────────────┘    │──────▶│  News API    │
+                          │  ┌──────────────┐    │       │ newsapi.org  │
+                          │  │ Celery Worker │    │       └──────────────┘
+                          │  │ (periodic)    │    │
+                          │  └──────────────┘    │
+                          └──────────────────────┘
 ```
 
-### 2.2 Data Flow
+**Request flow:**
 
-1. **User Request → Frontend**: User interacts with Angular UI
-2. **Frontend → Backend API**: HTTP request to Django REST API
-3. **API → Cache Check**: Check Redis for cached response
-4. **Cache Miss → Database**: Query PostgreSQL if not cached
-5. **Database → API**: Return data
-6. **API → Cache**: Store response in Redis
-7. **API → Frontend**: Return JSON response
-8. **Frontend → User**: Display data
-
-### 2.3 Background Processing Flow
-
-1. **Celery Beat**: Triggers scheduled tasks
-2. **Task Queue**: Adds task to Redis queue
-3. **Celery Worker**: Picks up task from queue
-4. **NewsAPI Fetch**: Retrieves articles from external API
-5. **Data Processing**: Validates and deduplicates articles
-6. **Database Update**: Stores new articles in PostgreSQL
-7. **Cache Invalidation**: Clears relevant cached data
+1. The user interacts with the Angular frontend at port 4200.
+2. Angular sends HTTP requests to the Django REST API at port 8000.
+3. The API checks Redis for a cached response.
+4. On a cache hit, the cached data is returned immediately.
+5. On a cache miss, the API queries PostgreSQL, stores the result in Redis, then returns it.
+6. Independently, Celery Beat triggers the Celery worker every 30 minutes to fetch new articles from NewsAPI and store them in PostgreSQL.
 
 ---
 
-## 3. Installation and Setup
+## 3. How to Run the Project
 
-### 3.1 System Requirements
+### Quick Start
 
-**Operating System**: Windows 10/11 with WSL2
+Start each of the following in a separate terminal window.
 
-**Software Requirements**:
-- Python 3.10 or higher
-- Node.js 18 or higher
-- PostgreSQL 14 or higher
-- Redis 7 or higher (via WSL)
-- Git
-
-### 3.2 Step-by-Step Installation
-
-#### Step 1: Install Prerequisites
-
-**Python Installation**:
-1. Download from [python.org](https://www.python.org/downloads/)
-2. Run installer and check "Add Python to PATH"
-3. Verify: `python --version`
-
-**Node.js Installation**:
-1. Download from [nodejs.org](https://nodejs.org/)
-2. Run installer with default settings
-3. Verify: `node --version` and `npm --version`
-
-**PostgreSQL Installation**:
-1. Download from [postgresql.org](https://www.postgresql.org/download/windows/)
-2. Run installer (remember the postgres user password)
-3. Add PostgreSQL bin directory to PATH
-4. Verify: `psql --version`
-
-**Redis Installation (WSL)**:
-1. Open PowerShell as Administrator
-2. Install WSL: `wsl --install`
-3. Restart computer
-4. Open WSL terminal
-5. Update packages: `sudo apt update`
-6. Install Redis: `sudo apt install redis-server`
-7. Verify: `redis-cli --version`
-
-#### Step 2: Clone Repository
-
-```bash
-git clone https://github.com/fawoenix/latest-news-dashboard.git
-cd news-dashboard
-```
-
-#### Step 3: Backend Setup
-
-**Create Virtual Environment**:
-```bash
-python -m venv venv
-```
-
-**Activate Virtual Environment**:
-```powershell
-# PowerShell
-.\venv\Scripts\Activate.ps1
-
-# Command Prompt
-.\venv\Scripts\activate.bat
-```
-
-**Install Dependencies**:
-```bash
-pip install -r requirements.txt
-```
-
-**If requirements.txt is not present**:
-```bash
-pip install django==4.2.7
-pip install djangorestframework==3.14.0
-pip install psycopg2-binary==2.9.9
-pip install django-redis==5.4.0
-pip install requests==2.31.0
-pip install django-cors-headers==4.3.1
-pip install celery==5.3.4
-pip install redis==5.0.1
-pip install drf-yasg==1.21.7
-pip install python-dotenv==1.0.0
-```
-
-**Create Environment File**:
-
-Create `.env` file in `backend/` directory:
-
-```env
-# NewsAPI Configuration
-NEWS_API_KEY=your_newsapi_key_from_newsapi_org
-
-# Database Configuration
-DB_NAME=news_dashboard
-DB_USER=news_user
-DB_PASSWORD=secure_password
-DB_HOST=localhost
-DB_PORT=5432
-
-# Redis Configuration
-REDIS_URL=redis://127.0.0.1:6379/1
-CELERY_BROKER_URL=redis://127.0.0.1:6379/0
-
-# Django Secret Key (generate a new one for production)
-SECRET_KEY=django-insecure-your-secret-key-here
-
-# Debug Mode (set to False in production)
-DEBUG=True
-
-# Allowed Hosts (comma-separated)
-ALLOWED_HOSTS=localhost,127.0.0.1
-```
-
-**Create .env.example** (for repository):
-```env
-NEWS_API_KEY=your_api_key_here
-DB_NAME=news_dashboard
-DB_USER=news_user
-DB_PASSWORD=your_password
-DB_HOST=localhost
-DB_PORT=5432
-REDIS_URL=redis://127.0.0.1:6379/1
-CELERY_BROKER_URL=redis://127.0.0.1:6379/0
-SECRET_KEY=your-secret-key
-DEBUG=True
-ALLOWED_HOSTS=localhost,127.0.0.1
-```
-
-#### Step 4: Frontend Setup
-
-```bash
-cd frontend
-npm install
-```
-
----
-
-## 4. Database Configuration
-
-### 4.1 PostgreSQL Setup
-
-#### Create Database and User
-
-**Using psql**:
-```bash
-psql -U postgres
-```
-
-```sql
--- Create user
-CREATE USER news_user WITH PASSWORD 'secure_password';
-
--- Create database
-CREATE DATABASE news_dashboard OWNER news_user;
-
--- Grant privileges
-GRANT ALL PRIVILEGES ON DATABASE news_dashboard TO news_user;
-
--- Connect to database
-\c news_dashboard
-
--- Grant schema privileges
-GRANT ALL ON SCHEMA public TO news_user;
-
--- Exit
-\q
-```
-
-**Using pgAdmin**:
-1. Open pgAdmin
-2. Right-click on "Login/Group Roles" → Create → Login/Group Role
-3. Name: `news_user`, Password: `secure_password`
-4. Right-click on "Databases" → Create → Database
-5. Name: `news_dashboard`, Owner: `news_user`
-
-### 4.2 Database Migrations
-
-Run migrations to create database schema:
-
-```bash
-cd backend
-python manage.py makemigrations
-python manage.py migrate
-```
-
-**Expected Output**:
-```
-Running migrations:
-  Applying contenttypes.0001_initial... OK
-  Applying auth.0001_initial... OK
-  Applying news.0001_initial... OK
-  ...
-```
-
-### 4.3 Database Schema
-
-**Article Model**:
-```python
-class Article(models.Model):
-    title = CharField(max_length=500)
-    description = TextField(blank=True, null=True)
-    content = TextField(blank=True, null=True)
-    url = URLField(unique=True, max_length=1000)
-    url_to_image = URLField(max_length=1000, blank=True, null=True)
-    published_at = DateTimeField()
-    source = CharField(max_length=200)
-    author = CharField(max_length=200, blank=True, null=True)
-    category = CharField(max_length=50, blank=True, null=True)
-    country = CharField(max_length=2, blank=True, null=True)
-    created_at = DateTimeField(auto_now_add=True)
-```
-
-### 4.4 Database Optimization
-
-**Indexes Created**:
-
-1. **Primary Key Index**: Automatic on `id`
-2. **Unique Index**: On `url` to prevent duplicates
-3. **B-tree Index**: On `published_at` for date sorting
-4. **Composite Index**: On `(category, published_at)` for filtered queries
-5. **Composite Index**: On `(source, published_at)` for source filtering
-6. **GIN Trigram Index**: On `title` and `description` for full-text search
-
-**Create Indexes** (if not automatically created):
-
-```sql
--- B-tree index for date sorting
-CREATE INDEX idx_article_published_at ON news_article(published_at DESC);
-
--- Composite indexes for filtered queries
-CREATE INDEX idx_article_category_date ON news_article(category, published_at DESC);
-CREATE INDEX idx_article_source_date ON news_article(source, published_at DESC);
-
--- Full-text search indexes
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
-CREATE INDEX idx_article_title_trgm ON news_article USING gin(title gin_trgm_ops);
-CREATE INDEX idx_article_description_trgm ON news_article USING gin(description gin_trgm_ops);
-```
-
-**Query Performance**:
-- Simple queries: < 50ms
-- Filtered queries: < 100ms
-- Full-text search: < 200ms
-- Pagination: < 50ms per page
-
----
-
-## 5. Caching Configuration
-
-### 5.1 Redis Setup
-
-**Start Redis (WSL)**:
+**Terminal 1 — Redis (WSL):**
 ```bash
 wsl
 sudo service redis-server start
 ```
 
-**Verify Redis**:
+**Terminal 2 — Django Backend:**
 ```bash
-redis-cli ping
-# Should return: PONG
+cd backend
+..\venv\Scripts\Activate.ps1
+python manage.py runserver
 ```
 
-**Redis Configuration** (settings.py):
+**Terminal 3 — Angular Frontend:**
+```bash
+cd frontend
+npx ng serve
+```
+
+**Terminal 4 — Celery Worker (optional, for automatic news fetching):**
+```bash
+cd backend
+..\venv\Scripts\Activate.ps1
+celery -A backend worker --loglevel=info --pool=solo
+```
+
+**Terminal 5 — Celery Beat Scheduler (optional):**
+```bash
+cd backend
+..\venv\Scripts\Activate.ps1
+celery -A backend beat --loglevel=info
+```
+
+Once all services are running, open your browser at:
+```
+http://localhost:4200
+```
+
+---
+
+## 4. Setup Process
+
+### 4.1 System Requirements
+
+**Operating system:** Windows 10 or Windows 11 with WSL2 enabled.
+
+**Required software:**
+
+| Tool | Version | Download |
+|------|---------|----------|
+| Python | 3.10+ | [python.org](https://www.python.org/downloads/) |
+| Node.js | 18+ | [nodejs.org](https://nodejs.org/) |
+| PostgreSQL | 14+ | [postgresql.org](https://www.postgresql.org/download/windows/) |
+| Git | Latest | [git-scm.com](https://git-scm.com/download/win) |
+| WSL2 | — | Via PowerShell (see Redis setup) |
+
+**Install WSL2** (required for Redis):
+Open PowerShell as Administrator and run:
+```powershell
+wsl --install
+```
+Restart your computer when prompted.
+
+---
+
+### 4.2 PostgreSQL Setup
+
+**Install PostgreSQL:**
+1. Download the installer from [postgresql.org](https://www.postgresql.org/download/windows/).
+2. Run the installer. Note the password you set for the `postgres` superuser.
+3. Ensure PostgreSQL is added to your system PATH during installation.
+
+**Create the database and user:**
+
+Open a terminal and connect to PostgreSQL:
+```bash
+psql -U postgres
+```
+
+Run the following SQL commands:
+```sql
+CREATE USER db_user WITH PASSWORD 'your_db_password';
+CREATE DATABASE news_dashboard OWNER db_user;
+ALTER USER db_user CREATEDB;
+\q
+```
+
+Replace `db_user` and `your_db_password` with values that match what you will put in your `.env` file.
+
+**Verify the connection:**
+```bash
+psql -U db_user -d news_dashboard
+```
+
+---
+
+### 4.3 Redis Setup (WSL)
+
+Redis does not run natively on Windows. It must be installed and run inside WSL.
+
+**Install Redis in WSL:**
+```bash
+wsl
+sudo apt-get update
+sudo apt-get install redis-server
+```
+
+**Start Redis:**
+```bash
+sudo service redis-server start
+```
+
+**Verify Redis is running:**
+```bash
+redis-cli ping
+```
+Expected output: `PONG`
+
+**Note:** Redis must be started each time you open a new WSL session. It does not start automatically.
+
+---
+
+### 4.4 Backend Setup
+
+**Step 1 — Clone the repository:**
+```bash
+git clone <REPOSITORY_URL>
+cd news-dashboard
+```
+
+**Step 2 — Create and activate a virtual environment:**
+```bash
+cd backend
+python -m venv ../venv
+```
+
+Activate it:
+```powershell
+# PowerShell
+..\venv\Scripts\Activate.ps1
+
+# Command Prompt
+..\venv\Scripts\activate.bat
+```
+
+If PowerShell blocks the script, run this once:
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
+
+**Step 3 — Install dependencies:**
+```bash
+pip install django djangorestframework psycopg2-binary django-redis ^
+            requests django-cors-headers celery redis drf-yasg python-dotenv
+```
+
+Or if `requirements.txt` is present:
+```bash
+pip install -r requirements.txt
+```
+
+**Step 4 — Configure environment variables:**
+
+Create the `.env` file from the example:
+```bash
+copy .env.example .env
+```
+
+Edit `backend/.env`:
+```env
+NEWS_API_KEY=your_newsapi_key_here
+
+DB_NAME=news_dashboard
+DB_USER=db_user
+DB_PASSWORD=your_db_password
+DB_HOST=localhost
+DB_PORT=5432
+
+REDIS_URL=redis://127.0.0.1:6379/1
+CELERY_BROKER_URL=redis://127.0.0.1:6379/0
+```
+
+Get a free News API key from [https://newsapi.org/](https://newsapi.org/).
+
+The `.env` file is listed in `.gitignore` and will not be committed to version control.
+
+**Step 5 — Apply database migrations:**
+```bash
+python manage.py migrate
+```
+
+**Step 6 — Fetch initial data:**
+```bash
+python manage.py fetch_news --all-categories
+```
+
+**Step 7 — (Optional) Create an admin user:**
+```bash
+python manage.py createsuperuser
+```
+
+**Step 8 — Start the server:**
+```bash
+python manage.py runserver
+```
+
+API available at: `http://localhost:8000`
+
+---
+
+### 4.5 Frontend Setup
+
+**Step 1 — Install Node.js dependencies:**
+```bash
+cd frontend
+npm install
+```
+
+**Step 2 — Start the development server:**
+```bash
+npx ng serve
+```
+
+Frontend available at: `http://localhost:4200`
+
+---
+
+## 5. Database Design and Optimization
+
+### 5.1 Database Schema
+
+The main model is `Article`, which stores fetched news articles.
+
+```
+Article
+├── id              (auto primary key)
+├── title           (CharField, max 500)
+├── description     (TextField, nullable)
+├── content         (TextField, nullable)
+├── url             (URLField, unique)
+├── url_to_image    (URLField, nullable)
+├── published_at    (DateTimeField)
+├── source_name     (CharField)
+├── author          (CharField, nullable)
+├── category        (CharField)
+├── country         (CharField, 2 chars)
+└── created_at      (DateTimeField, auto)
+```
+
+The unique constraint on `url` ensures articles are never duplicated during repeated fetches.
+
+### 5.2 Indexing Strategy
+
+| Index Type | Fields | Purpose |
+|------------|--------|---------|
+| B-tree | `published_at DESC` | Fast default ordering by date |
+| Composite | `(category, published_at DESC)` | Category filter with date ordering |
+| Composite | `(source_name, published_at DESC)` | Source filter with date ordering |
+| Composite | `(country, published_at DESC)` | Country filter with date ordering |
+| GIN trigram | `title` | Fast full-text ICONTAINS search |
+| GIN trigram | `description` | Fast full-text ICONTAINS search |
+| Unique | `url` | Deduplication during upsert |
+
+These indexes are created in migration `0002_database_optimization.py`.
+
+### 5.3 Table Partitioning
+
+A partitioned archive table (`news_article_archive`) is used for older articles. It uses range partitioning on `published_at` with quarterly partitions. Articles older than 90 days can be moved to this table using the `archive_old_articles()` PostgreSQL function, keeping the main table lean for fast queries.
+
+```sql
+-- Archive old articles (run periodically)
+SELECT archive_old_articles();
+```
+
+### 5.4 Query Optimizations
+
+- `defer()` excludes the heavy `content` field from list queries, reducing data transfer.
+- `select_related()` on category and source fields avoids N+1 query problems.
+- A lightweight `ArticleListSerializer` is used for list views and omits the `content` field.
+- `CONN_MAX_AGE=600` keeps database connections persistent across requests.
+- `statement_timeout=30s` prevents runaway queries from blocking the database.
+
+---
+
+## 6. Caching Strategy
+
+### 6.1 Cache Backend
+
+Redis is used as the cache backend via `django-redis`. The cache is configured with pickle serialization and zlib compression to minimize memory usage.
+
 ```python
 CACHES = {
-    'default': {
-        'BACKEND': 'django_redis.cache.RedisCache',
-        'LOCATION': 'redis://127.0.0.1:6379/1',
-        'OPTIONS': {
-            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
-        },
-        'KEY_PREFIX': 'news_dashboard',
-        'TIMEOUT': 600,  # 10 minutes
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": "redis://127.0.0.1:6379/1",
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+            "COMPRESSOR": "django_redis.compressors.zlib.ZlibCompressor",
+        }
     }
 }
 ```
 
-### 5.2 Caching Strategy
+A connection pool of 100 connections with retry-on-timeout is configured to handle concurrent requests reliably.
 
-**Cache Levels**:
+### 6.2 What is Cached and for How Long
 
-1. **API Response Caching**: Cache entire API responses
-2. **Query Result Caching**: Cache database query results
-3. **Session Caching**: Store session data in Redis
+| Cache Target | TTL | Reason |
+|--------------|-----|--------|
+| Article list responses | 10 minutes | Reduces DB load for paginated queries |
+| Category list | 15 minutes | Changes rarely |
+| Source list | 15 minutes | Changes rarely |
+| Django sessions | Default Redis TTL | Session data stored in Redis |
 
-**Cached Endpoints**:
+### 6.3 Cache Invalidation
 
-| Endpoint | Cache Duration | Key Pattern |
-|----------|---------------|-------------|
-| `/api/news/articles/` | 10 minutes | `articles:page:{page}:category:{cat}:search:{q}` |
-| `/api/news/categories/` | 15 minutes | `categories:all` |
-| `/api/news/sources/` | 15 minutes | `sources:all` |
+Cached article list responses are invalidated when new articles are fetched, ensuring users see fresh data after background task runs.
 
-**Cache Implementation**:
-
-```python
-from django.core.cache import cache
-from django.utils.decorators import method_decorator
-from django.views.decorators.cache import cache_page
-
-class ArticleListView(ListAPIView):
-    @method_decorator(cache_page(60 * 10))  # 10 minutes
-    def dispatch(self, *args, **kwargs):
-        return super().dispatch(*args, **kwargs)
-```
-
-### 5.3 Cache Management
-
-**Clear All Cache**:
-```python
-from django.core.cache import cache
-cache.clear()
-```
-
-**Clear Specific Key**:
-```python
-cache.delete('articles:page:1:category:technology')
-```
-
-**Manual Cache Invalidation**:
+**Manual cache clear:**
 ```bash
 python manage.py shell
 ```
@@ -446,152 +407,177 @@ cache.clear()
 exit()
 ```
 
-**Redis CLI Commands**:
+**Cache warmup** (pre-populate cache after a clear):
 ```bash
-redis-cli
-> FLUSHDB  # Clear current database
-> KEYS *   # List all keys
-> TTL key  # Check time to live
-> DEL key  # Delete specific key
+python manage.py warmup_cache
 ```
 
 ---
 
-## 6. API Documentation
+## 7. API Documentation
 
-### 6.1 Accessing API Documentation
+### 7.1 Interactive Documentation
 
-**Swagger UI**:
-```
-http://127.0.0.1:8000/swagger/
-```
-- Interactive API documentation
-- Try out endpoints directly
-- View request/response schemas
+| URL | Description |
+|-----|-------------|
+| `http://localhost:8000/swagger/` | Swagger UI — interactive endpoint testing |
+| `http://localhost:8000/redoc/` | ReDoc — clean reference documentation |
+| `http://localhost:8000/admin/` | Django Admin panel |
 
-**ReDoc**:
-```
-http://127.0.0.1:8000/redoc/
-```
-- Clean, readable API documentation
-- Better for reference
+---
 
-### 6.2 API Endpoints
+### 7.2 Endpoints Reference
 
-#### 6.2.1 Articles List
+---
 
-**Endpoint**: `GET /api/news/articles/`
+#### GET `/api/news/articles/`
 
-**Description**: Retrieve paginated list of news articles with optional filtering and search.
+Returns a paginated list of news articles. Supports filtering and full-text search.
 
-**Query Parameters**:
-- `page` (integer): Page number (default: 1)
-- `category` (string): Filter by category (e.g., technology, business, sports)
-- `source` (string): Filter by news source (e.g., CNN, BBC)
-- `country` (string): Filter by country code (e.g., us, gb)
-- `search` (string): Full-text search query
+**Query Parameters:**
 
-**Response**:
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `page` | integer | No | Page number. Default: 1. Page size: 50. |
+| `category` | string | No | Filter by category slug (e.g. `technology`, `sports`, `health`) |
+| `source` | string | No | Filter by source ID (e.g. `bbc-news`, `cnn`) |
+| `country` | string | No | Filter by 2-letter country code (e.g. `us`, `gb`) |
+| `search` | string | No | Full-text search across title and description |
+
+**Response:**
 ```json
 {
-  "count": 150,
-  "next": "http://127.0.0.1:8000/api/news/articles/?page=2",
+  "count": 250,
+  "next": "http://localhost:8000/api/news/articles/?page=2",
   "previous": null,
   "results": [
     {
       "id": 1,
-      "title": "Breaking News: Technology Advancement",
-      "description": "Description of the article...",
-      "content": "Full article content...",
-      "url": "https://example.com/article",
-      "url_to_image": "https://example.com/image.jpg",
-      "published_at": "2024-02-10T10:30:00Z",
-      "source": "TechNews",
-      "author": "John Doe",
+      "title": "Article title here",
+      "description": "Short description of the article.",
+      "url": "https://source.com/article",
+      "url_to_image": "https://source.com/image.jpg",
+      "published_at": "2026-02-11T10:00:00Z",
+      "source_name": "BBC News",
+      "author": "Jane Smith",
       "category": "technology",
-      "country": "us",
-      "created_at": "2024-02-10T10:35:00Z"
+      "country": "gb"
     }
   ]
 }
 ```
 
-**Examples**:
-
+**Example requests:**
 ```bash
-# Get all articles (page 1)
-curl http://127.0.0.1:8000/api/news/articles/
+# All articles, first page
+curl http://localhost:8000/api/news/articles/
 
-# Get technology articles
-curl "http://127.0.0.1:8000/api/news/articles/?category=technology"
+# Filter by category
+curl http://localhost:8000/api/news/articles/?category=technology
 
-# Search for AI articles
-curl "http://127.0.0.1:8000/api/news/articles/?search=AI"
+# Full-text search
+curl http://localhost:8000/api/news/articles/?search=AI
 
-# Combine filters
-curl "http://127.0.0.1:8000/api/news/articles/?category=technology&country=us&search=innovation"
+# Combined filters
+curl "http://localhost:8000/api/news/articles/?category=technology&search=AI&page=2"
 
-# PowerShell example
-Invoke-WebRequest -Uri "http://127.0.0.1:8000/api/news/articles/?category=technology"
+# Filter by country and source
+curl "http://localhost:8000/api/news/articles/?country=us&source=cnn"
 ```
 
-#### 6.2.2 Categories List
+---
 
-**Endpoint**: `GET /api/news/categories/`
+#### GET `/api/news/articles/<id>/`
 
-**Description**: Retrieve all available news categories.
+Returns the full details of a single article including the `content` field.
 
-**Response**:
+**URL Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `id` | integer | The article's ID |
+
+**Response:**
 ```json
 {
-  "categories": [
-    "business",
-    "entertainment",
-    "general",
-    "health",
-    "science",
-    "sports",
-    "technology"
-  ]
+  "id": 1,
+  "title": "Article title here",
+  "description": "Short description.",
+  "content": "Full article content...",
+  "url": "https://source.com/article",
+  "url_to_image": "https://source.com/image.jpg",
+  "published_at": "2026-02-11T10:00:00Z",
+  "source_name": "BBC News",
+  "author": "Jane Smith",
+  "category": "technology",
+  "country": "gb",
+  "created_at": "2026-02-11T10:05:00Z"
 }
 ```
 
-**Example**:
+**Example:**
 ```bash
-curl http://127.0.0.1:8000/api/news/categories/
+curl http://localhost:8000/api/news/articles/1/
 ```
 
-#### 6.2.3 Sources List
+---
 
-**Endpoint**: `GET /api/news/sources/`
+#### GET `/api/news/categories/`
 
-**Description**: Retrieve all available news sources.
+Returns all categories that have at least one article, along with article counts.
 
-**Response**:
+**Response:**
 ```json
-{
-  "sources": [
-    "BBC News",
-    "CNN",
-    "TechCrunch",
-    "The Guardian",
-    "The New York Times"
-  ]
-}
+[
+  { "name": "business", "count": 45 },
+  { "name": "entertainment", "count": 30 },
+  { "name": "health", "count": 22 },
+  { "name": "science", "count": 18 },
+  { "name": "sports", "count": 60 },
+  { "name": "technology", "count": 75 }
+]
 ```
 
-**Example**:
+**Example:**
 ```bash
-curl http://127.0.0.1:8000/api/news/sources/
+curl http://localhost:8000/api/news/categories/
 ```
 
-#### 6.2.4 Manual Fetch
+---
 
-**Endpoint**: `POST /api/news/fetch/`
+#### GET `/api/news/sources/`
 
-**Description**: Manually trigger news fetching from NewsAPI.
+Returns all news sources that have at least one article, along with article counts.
 
-**Request Body**:
+**Response:**
+```json
+[
+  { "name": "BBC News", "id": "bbc-news", "count": 40 },
+  { "name": "CNN", "id": "cnn", "count": 35 },
+  { "name": "TechCrunch", "id": "techcrunch", "count": 28 }
+]
+```
+
+**Example:**
+```bash
+curl http://localhost:8000/api/news/sources/
+```
+
+---
+
+#### POST `/api/news/fetch/`
+
+Manually triggers a news fetch from NewsAPI. Useful for pulling fresh articles on demand without waiting for the Celery scheduler.
+
+**Request Body:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `category` | string | No | Category to fetch (e.g. `technology`) |
+| `country` | string | No | Country code to filter by (e.g. `us`) |
+| `query` | string | No | Search keyword for NewsAPI |
+
+**Example request body:**
 ```json
 {
   "category": "technology",
@@ -600,821 +586,183 @@ curl http://127.0.0.1:8000/api/news/sources/
 }
 ```
 
-**Response**:
+**Response:**
 ```json
 {
   "status": "success",
-  "message": "Fetched 20 new articles",
-  "articles_count": 20,
-  "duplicates_skipped": 5
+  "articles_fetched": 20,
+  "duplicates_skipped": 3
 }
 ```
 
-**Examples**:
-
+**Example:**
 ```bash
-# Fetch technology news
-curl -X POST http://127.0.0.1:8000/api/news/fetch/ \
+curl -X POST http://localhost:8000/api/news/fetch/ \
   -H "Content-Type: application/json" \
-  -d '{"category":"technology","country":"us"}'
-
-# Fetch with search query
-curl -X POST http://127.0.0.1:8000/api/news/fetch/ \
-  -H "Content-Type: application/json" \
-  -d '{"query":"machine learning"}'
-
-# PowerShell example
-$body = @{
-    category = "technology"
-    country = "us"
-} | ConvertTo-Json
-
-Invoke-WebRequest -Uri "http://127.0.0.1:8000/api/news/fetch/" `
-  -Method POST `
-  -Body $body `
-  -ContentType "application/json"
+  -d "{\"category\": \"technology\", \"country\": \"us\"}"
 ```
 
-### 6.3 Error Responses
+---
 
-**400 Bad Request**:
-```json
-{
-  "error": "Invalid category",
-  "detail": "Category must be one of: business, entertainment, general, health, science, sports, technology"
-}
-```
+### 7.3 Error Responses
 
-**404 Not Found**:
+| Status Code | Meaning |
+|-------------|---------|
+| 200 | Success |
+| 400 | Bad request — invalid query parameter |
+| 404 | Article not found |
+| 500 | Internal server error |
+
+**Example 404 response:**
 ```json
 {
   "detail": "Not found."
 }
 ```
 
-**500 Internal Server Error**:
-```json
-{
-  "error": "Internal server error",
-  "detail": "An error occurred while processing your request"
-}
-```
-
-### 6.4 Rate Limiting
-
-**NewsAPI Limits**:
-- Free tier: 100 requests per day
-- Developer tier: 500 requests per day
-
-**Application Limits**:
-- Caching reduces API calls significantly
-- Background tasks scheduled to respect limits
-
----
-
-## 7. Running the Project
-
-### 7.1 Prerequisites Check
-
-Before running, ensure:
-- PostgreSQL service is running
-- Redis is running in WSL
-- Database is created and migrated
-- Environment variables are configured
-
-### 7.2 Complete Startup Guide
-
-#### Step 1: Start Redis
-
-Open WSL terminal:
-```bash
-wsl
-sudo service redis-server start
-redis-cli ping  # Verify
-```
-
-Keep this terminal open.
-
-#### Step 2: Start Django Backend
-
-Open new terminal (PowerShell or CMD):
-```bash
-cd backend
-.\venv\Scripts\Activate.ps1
-python manage.py runserver
-```
-
-**Expected Output**:
-```
-Watching for file changes with StatReloader
-Performing system checks...
-
-System check identified no issues (0 silenced).
-February 11, 2026 - 10:30:00
-Django version 4.2.7, using settings 'backend.settings'
-Starting development server at http://127.0.0.1:8000/
-Quit the server with CTRL-BREAK.
-```
-
-Access: http://127.0.0.1:8000
-
-#### Step 3: Start Angular Frontend
-
-Open new terminal:
-```bash
-cd frontend
-npx ng serve
-```
-
-**Expected Output**:
-```
-✔ Browser application bundle generation complete.
-
-Initial Chunk Files   | Names         |  Raw Size
-main.js              | main          |   1.2 MB |
-styles.css           | styles        | 150.0 kB |
-
-Build at: 2026-02-11T10:30:00.000Z
-** Angular Live Development Server is listening on localhost:4200 **
-```
-
-Access: http://localhost:4200
-
-#### Step 4: (Optional) Start Celery Worker
-
-Open new terminal:
-```bash
-cd backend
-.\venv\Scripts\Activate.ps1
-celery -A backend worker --loglevel=info --pool=solo
-```
-
-**Note**: `--pool=solo` is required for Windows.
-
-#### Step 5: (Optional) Start Celery Beat
-
-Open new terminal:
-```bash
-cd backend
-.\venv\Scripts\Activate.ps1
-celery -A backend beat --loglevel=info
-```
-
-### 7.3 Verify Installation
-
-1. **Backend API**: http://127.0.0.1:8000/api/news/articles/
-2. **Frontend**: http://localhost:4200
-3. **Swagger Docs**: http://127.0.0.1:8000/swagger/
-4. **Admin Panel**: http://127.0.0.1:8000/admin/
-
-### 7.4 Initial Data Loading
-
-Load initial news data:
-```bash
-python manage.py fetch_news --all-categories
-```
-
-This will fetch articles from all categories.
-
-### 7.5 Create Admin User (Optional)
-
-```bash
-python manage.py createsuperuser
-```
-
-Follow prompts to create admin account.
-
 ---
 
 ## 8. Background Tasks
 
+Celery is used to run periodic tasks without blocking the web server.
+
 ### 8.1 Celery Configuration
 
-**Celery Setup** (backend/celery.py):
-```python
-from celery import Celery
-from celery.schedules import crontab
+Celery is configured in `backend/celery.py` and uses Redis as the message broker. Celery Beat acts as a scheduler that triggers tasks at defined intervals.
 
-app = Celery('backend')
-app.config_from_object('django.conf:settings', namespace='CELERY')
-app.autodiscover_tasks()
+### 8.2 Scheduled Tasks
 
-app.conf.beat_schedule = {
-    'fetch-news-every-hour': {
-        'task': 'news.tasks.fetch_news_task',
-        'schedule': crontab(minute=0),  # Every hour
-    },
-}
+| Task | Schedule | Description |
+|------|----------|-------------|
+| `fetch_news_task` | Every 30 minutes | Fetches latest articles from NewsAPI for all categories |
+| `cleanup_old_articles` | Daily at midnight | Archives articles older than 90 days |
+
+### 8.3 Running Celery on Windows
+
+Windows requires the `--pool=solo` flag for the Celery worker:
+
+```bash
+celery -A backend worker --loglevel=info --pool=solo
 ```
 
-### 8.2 Available Tasks
-
-**1. Fetch News Task**:
-```python
-@shared_task
-def fetch_news_task(category=None, country='us'):
-    """Fetch news articles from NewsAPI"""
-    # Task implementation
+Run Celery Beat in a separate terminal:
+```bash
+celery -A backend beat --loglevel=info
 ```
 
-**2. Cleanup Old Articles**:
-```python
-@shared_task
-def cleanup_old_articles():
-    """Remove articles older than 30 days"""
-    # Task implementation
-```
+### 8.4 Triggering Tasks Manually
 
-### 8.3 Manual Task Execution
-
-**From Django Shell**:
 ```bash
 python manage.py shell
 ```
-
 ```python
 from news.tasks import fetch_news_task
-
-# Execute task immediately
-fetch_news_task.delay('technology', 'us')
-
-# Check task status
-result = fetch_news_task.delay('technology')
-result.ready()  # True if complete
-result.get()    # Get result
-```
-
-### 8.4 Monitoring Tasks
-
-**Celery Flower** (Web-based monitoring):
-```bash
-pip install flower
-celery -A backend flower
-```
-
-Access: http://localhost:5555
-
-### 8.5 Task Scheduling
-
-**Periodic Tasks Configuration**:
-- Fetch news: Every hour
-- Cleanup old articles: Daily at midnight
-- Clear cache: Every 6 hours
-
-**Custom Schedule** (settings.py):
-```python
-from celery.schedules import crontab
-
-CELERY_BEAT_SCHEDULE = {
-    'fetch-technology-news': {
-        'task': 'news.tasks.fetch_news_task',
-        'schedule': crontab(minute='*/30'),  # Every 30 minutes
-        'args': ('technology', 'us')
-    },
-    'cleanup-articles': {
-        'task': 'news.tasks.cleanup_old_articles',
-        'schedule': crontab(hour=0, minute=0),  # Daily at midnight
-    },
-}
+fetch_news_task.delay(category='technology', country='us')
 ```
 
 ---
 
 ## 9. Project Structure
 
-### 9.1 Complete Directory Structure
-
 ```
 news-dashboard/
-│
 ├── backend/
 │   ├── backend/
-│   │   ├── __init__.py
-│   │   ├── settings.py         # Django configuration
-│   │   ├── urls.py             # URL routing
-│   │   ├── wsgi.py             # WSGI config
-│   │   ├── asgi.py             # ASGI config
-│   │   └── celery.py           # Celery configuration
-│   │
+│   │   ├── settings.py                    # Django settings
+│   │   ├── urls.py                        # Root URL configuration
+│   │   ├── celery.py                      # Celery configuration
+│   │   └── wsgi.py                        # WSGI entry point
 │   ├── news/
-│   │   ├── __init__.py
-│   │   ├── models.py           # Database models
-│   │   ├── serializers.py      # DRF serializers
-│   │   ├── views.py            # API views
-│   │   ├── urls.py             # App URLs
-│   │   ├── services.py         # Business logic
-│   │   ├── tasks.py            # Celery tasks
-│   │   ├── admin.py            # Django admin
-│   │   ├── apps.py             # App configuration
-│   │   └── tests.py            # Unit tests
-│   │
-│   ├── manage.py               # Django management
-│   ├── requirements.txt        # Python dependencies
-│   ├── .env                    # Environment variables (not committed)
-│   └── .env.example            # Environment template
-│
+│   │   ├── models.py                      # Article, Category, Source models
+│   │   ├── serializers.py                 # DRF serializers
+│   │   ├── views.py                       # API views with caching
+│   │   ├── urls.py                        # News app URL patterns
+│   │   ├── services.py                    # NewsAPI service layer
+│   │   ├── tasks.py                       # Celery periodic tasks
+│   │   ├── admin.py                       # Django admin configuration
+│   │   ├── tests.py                       # Unit tests
+│   │   ├── management/
+│   │   │   └── commands/
+│   │   │       └── fetch_news.py          # CLI command to fetch news
+│   │   └── migrations/
+│   │       ├── 0001_initial.py
+│   │       └── 0002_database_optimization.py
+│   ├── manage.py
+│   ├── requirements.txt
+│   ├── .env                               # Environment variables (not committed)
+│   └── .env.example                       # Environment variable template
 ├── frontend/
 │   ├── src/
 │   │   ├── app/
 │   │   │   ├── components/
-│   │   │   │   ├── article-list/
-│   │   │   │   ├── article-detail/
-│   │   │   │   ├── search-bar/
-│   │   │   │   └── filter-sidebar/
-│   │   │   │
-│   │   │   ├── services/
-│   │   │   │   ├── news.service.ts
-│   │   │   │   └── api.service.ts
-│   │   │   │
+│   │   │   │   ├── header/
+│   │   │   │   ├── dashboard/
+│   │   │   │   └── article-card/
 │   │   │   ├── models/
-│   │   │   │   └── article.model.ts
-│   │   │   │
-│   │   │   ├── app.component.ts
-│   │   │   ├── app.component.html
-│   │   │   └── app.routes.ts
-│   │   │
-│   │   ├── assets/
-│   │   ├── environments/
-│   │   ├── index.html
-│   │   └── main.ts
-│   │
+│   │   │   │   └── news.model.ts
+│   │   │   ├── services/
+│   │   │   │   └── news.service.ts
+│   │   │   ├── app.ts
+│   │   │   ├── app.routes.ts
+│   │   │   └── app.config.ts
+│   │   └── styles.css
 │   ├── angular.json
-│   ├── package.json
-│   ├── tsconfig.json
-│   └── README.md
-│
-├── .gitignore
+│   └── package.json
+├── venv/
 ├── README.md
 └── DOCUMENTATION.md
 ```
-
-### 9.2 Key Files Explained
-
-**backend/settings.py**:
-- Django configuration
-- Database settings
-- Cache configuration
-- CORS settings
-- Installed apps
-
-**backend/celery.py**:
-- Celery configuration
-- Task scheduling
-- Beat schedule
-
-**news/models.py**:
-- Article model definition
-- Database schema
-
-**news/serializers.py**:
-- Data validation
-- JSON serialization
-
-**news/views.py**:
-- API endpoints
-- Request handling
-
-**news/services.py**:
-- NewsAPI integration
-- Business logic
-
-**news/tasks.py**:
-- Celery tasks
-- Background jobs
 
 ---
 
 ## 10. Troubleshooting
 
-### 10.1 Common Issues and Solutions
+### PowerShell execution policy error
 
-#### Issue 1: Virtual Environment Activation Error
-
-**Problem**: PowerShell execution policy prevents script execution
-
-**Error Message**:
-```
-File cannot be loaded because running scripts is disabled on this system
-```
-
-**Solution**:
 ```powershell
 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 ```
 
-#### Issue 2: Port Already in Use
+### Port 8000 already in use
 
-**Problem**: Django port 8000 is occupied
-
-**Error Message**:
-```
-Error: That port is already in use.
-```
-
-**Solution**:
 ```powershell
-# Find process using port 8000
 netstat -ano | findstr :8000
-
-# Kill the process
-taskkill /PID <PID_NUMBER> /F
-
-# Or run Django on different port
-python manage.py runserver 8001
+taskkill /PID <PID> /F
 ```
 
-#### Issue 3: PostgreSQL Connection Failed
+### Cannot connect to PostgreSQL
 
-**Problem**: Cannot connect to PostgreSQL
+1. Open `services.msc` and verify the PostgreSQL service is running.
+2. Confirm the credentials in `.env` match what you set during PostgreSQL setup.
+3. Test directly: `psql -U db_user -d news_dashboard`
 
-**Error Message**:
-```
-django.db.utils.OperationalError: could not connect to server
-```
+### Cannot connect to Redis
 
-**Solutions**:
+1. Open WSL and run: `sudo service redis-server start`
+2. Verify: `redis-cli ping` — should return `PONG`
 
-1. Check PostgreSQL service:
-```powershell
-# Open Services
-services.msc
-# Find postgresql-x64-14 and ensure it's running
-```
+### Celery worker fails on Windows
 
-2. Verify credentials in `.env`:
-```env
-DB_NAME=news_dashboard
-DB_USER=news_user
-DB_PASSWORD=secure_password
-DB_HOST=localhost
-DB_PORT=5432
-```
-
-3. Test connection:
-```bash
-psql -U news_user -d news_dashboard
-```
-
-4. Check PostgreSQL is listening:
-```powershell
-netstat -an | findstr "5432"
-```
-
-#### Issue 4: Redis Connection Error
-
-**Problem**: Cannot connect to Redis
-
-**Error Message**:
-```
-redis.exceptions.ConnectionError: Error connecting to Redis
-```
-
-**Solutions**:
-
-1. Ensure WSL is running:
-```bash
-wsl
-```
-
-2. Start Redis:
-```bash
-sudo service redis-server start
-```
-
-3. Verify Redis is running:
-```bash
-redis-cli ping
-# Should return: PONG
-```
-
-4. Check Redis status:
-```bash
-sudo service redis-server status
-```
-
-5. Restart Redis if needed:
-```bash
-sudo service redis-server restart
-```
-
-#### Issue 5: Celery Worker Not Starting (Windows)
-
-**Problem**: Celery worker fails on Windows
-
-**Error Message**:
-```
-ValueError: not enough values to unpack
-```
-
-**Solution**:
-Always use `--pool=solo` flag on Windows:
+Always use the `--pool=solo` flag:
 ```bash
 celery -A backend worker --loglevel=info --pool=solo
 ```
 
-#### Issue 6: NewsAPI Key Invalid
+### No articles showing in the frontend
 
-**Problem**: NewsAPI returns 401 Unauthorized
-
-**Error Message**:
-```
-{"status":"error","code":"apiKeyInvalid"}
-```
-
-**Solutions**:
-
-1. Verify API key in `.env`:
-```env
-NEWS_API_KEY=your_actual_key_here
-```
-
-2. Get new API key from [newsapi.org](https://newsapi.org/)
-
-3. Restart Django server after updating `.env`
-
-#### Issue 7: Module Not Found
-
-**Problem**: Python module import errors
-
-**Error Message**:
-```
-ModuleNotFoundError: No module named 'django'
-```
-
-**Solutions**:
-
-1. Ensure virtual environment is activated:
-```powershell
-.\venv\Scripts\Activate.ps1
-```
-
-2. Reinstall dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-3. Verify Python version:
-```bash
-python --version  # Should be 3.10+
-```
-
-#### Issue 8: Database Migration Errors
-
-**Problem**: Migration fails
-
-**Error Message**:
-```
-django.db.utils.ProgrammingError: relation does not exist
-```
-
-**Solutions**:
-
-1. Reset migrations:
-```bash
-# Delete migration files (except __init__.py)
-# Then run:
-python manage.py makemigrations
-python manage.py migrate
-```
-
-2. Drop and recreate database:
-```sql
-DROP DATABASE news_dashboard;
-CREATE DATABASE news_dashboard OWNER news_user;
-```
-
-3. Run migrations again:
-```bash
-python manage.py migrate
-```
-
-#### Issue 9: CORS Errors in Frontend
-
-**Problem**: Frontend cannot access API
-
-**Error Message**:
-```
-Access to XMLHttpRequest blocked by CORS policy
-```
-
-**Solution**:
-
-Verify CORS settings in `settings.py`:
-```python
-INSTALLED_APPS = [
-    ...
-    'corsheaders',
-]
-
-MIDDLEWARE = [
-    'corsheaders.middleware.CorsMiddleware',
-    ...
-]
-
-CORS_ALLOWED_ORIGINS = [
-    'http://localhost:4200',
-    'http://127.0.0.1:4200',
-]
-```
-
-#### Issue 10: Articles Not Displaying
-
-**Problem**: API returns empty results
-
-**Solutions**:
-
-1. Fetch initial data:
+Run the fetch command to populate the database:
 ```bash
 python manage.py fetch_news --all-categories
 ```
 
-2. Check database:
-```bash
-python manage.py shell
-```
-```python
-from news.models import Article
-print(Article.objects.count())
-```
+### Module not found errors
 
-3. Clear cache:
-```python
-from django.core.cache import cache
-cache.clear()
-```
-
-### 10.2 Debug Mode
-
-**Enable Debug Mode**:
-
-In `.env`:
-```env
-DEBUG=True
-```
-
-In `settings.py`:
-```python
-DEBUG = True
-LOGGING = {
-    'version': 1,
-    'disable_existing_loggers': False,
-    'handlers': {
-        'console': {
-            'class': 'logging.StreamHandler',
-        },
-    },
-    'root': {
-        'handlers': ['console'],
-        'level': 'DEBUG',
-    },
-}
-```
-
-### 10.3 Logging
-
-**Check Django Logs**:
-Logs appear in console where Django is running
-
-**Check Celery Logs**:
-Logs appear in console where Celery worker is running
-
-**Check Redis Logs** (WSL):
-```bash
-sudo tail -f /var/log/redis/redis-server.log
-```
-
-**Check PostgreSQL Logs**:
-```
-C:\Program Files\PostgreSQL\14\data\log\
-```
-
-### 10.4 Getting Help
-
-If issues persist:
-
-1. Check error message carefully
-2. Search Django/DRF documentation
-3. Check Celery documentation for task-related issues
-4. Review PostgreSQL logs for database issues
-5. Verify all services are running
-6. Check environment variables
-7. Review this documentation
-
----
-
-## Appendix
-
-### A. Useful Commands
-
-**Django**:
-```bash
-# Create superuser
-python manage.py createsuperuser
-
-# Shell
-python manage.py shell
-
-# Database shell
-python manage.py dbshell
-
-# Show migrations
-python manage.py showmigrations
-
-# Collect static files
-python manage.py collectstatic
-```
-
-**Celery**:
-```bash
-# Worker
-celery -A backend worker --loglevel=info --pool=solo
-
-# Beat
-celery -A backend beat --loglevel=info
-
-# Inspect active tasks
-celery -A backend inspect active
-
-# Purge queue
-celery -A backend purge
-```
-
-**Redis**:
-```bash
-# Connect to Redis CLI
-redis-cli
-
-# Monitor commands
-redis-cli MONITOR
-
-# Get all keys
-redis-cli KEYS *
-
-# Flush database
-redis-cli FLUSHDB
-```
-
-**PostgreSQL**:
-```bash
-# Connect to database
-psql -U news_user -d news_dashboard
-
-# List databases
-\l
-
-# List tables
-\dt
-
-# Describe table
-\d news_article
-
-# Execute SQL
-psql -U news_user -d news_dashboard -c "SELECT COUNT(*) FROM news_article;"
-```
-
-### B. Environment Variables Reference
-
-| Variable | Description | Example |
-|----------|-------------|---------|
-| `NEWS_API_KEY` | NewsAPI key | `abc123...` |
-| `DB_NAME` | Database name | `news_dashboard` |
-| `DB_USER` | Database user | `news_user` |
-| `DB_PASSWORD` | Database password | `secure_password` |
-| `DB_HOST` | Database host | `localhost` |
-| `DB_PORT` | Database port | `5432` |
-| `REDIS_URL` | Redis cache URL | `redis://127.0.0.1:6379/1` |
-| `CELERY_BROKER_URL` | Celery broker | `redis://127.0.0.1:6379/0` |
-| `SECRET_KEY` | Django secret | `random-string` |
-| `DEBUG` | Debug mode | `True` or `False` |
-| `ALLOWED_HOSTS` | Allowed hosts | `localhost,127.0.0.1` |
-
-### C. API Rate Limits
-
-| Tier | Requests/Day | Requests/Second |
-|------|--------------|-----------------|
-| Free | 100 | 5 |
-| Developer | 500 | 10 |
-| Professional | 5,000 | 50 |
-
-### D. Database Maintenance
-
-**Backup Database**:
-```bash
-pg_dump -U news_user news_dashboard > backup.sql
-```
-
-**Restore Database**:
-```bash
-psql -U news_user news_dashboard < backup.sql
-```
-
-**Vacuum Database**:
-```sql
-VACUUM ANALYZE news_article;
+Ensure your virtual environment is activated before running any Python commands:
+```powershell
+..\venv\Scripts\Activate.ps1
 ```
 
 ---
 
-**Document Version**: 1.0
-**Last Updated**: February 11, 2026
-**Author**: Lamia Ben Salem
+**Author:** Lamia Ben Salem
+**Last updated:** February 2026
