@@ -1,0 +1,70 @@
+<article
+  (click)="openArticle()"
+  class="group bg-white rounded-xl border border-gray-200 overflow-hidden cursor-pointer transition-all duration-300 hover:shadow-lg hover:border-gray-300 hover:-translate-y-1 flex flex-col h-full"
+>
+  <!-- Image -->
+  <div class="relative overflow-hidden aspect-video bg-gray-100">
+    <img
+      [src]="article.url_to_image || fallbackImage"
+      [alt]="article.title"
+      (error)="onImageError($event)"
+      class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+      loading="lazy"
+    />
+    <!-- Category badge -->
+    @if (article.category_name) {
+      <span
+        class="absolute top-3 left-3 px-2.5 py-1 text-xs font-semibold rounded-full bg-blue-600 text-white shadow-sm"
+      >
+        {{ article.category_name }}
+      </span>
+    }
+  </div>
+
+  <!-- Content -->
+  <div class="flex flex-col flex-1 p-5">
+    <!-- Source & Date row -->
+    <div class="flex items-center justify-between text-xs text-gray-500 mb-2.5">
+      <span class="font-medium text-gray-700 truncate max-w-[60%]">
+        {{ article.source_name || 'Unknown Source' }}
+      </span>
+      <time class="shrink-0">
+        {{ article.published_at | date: 'MMM d, yyyy' }}
+      </time>
+    </div>
+
+    <!-- Title -->
+    <h3
+      class="text-base font-semibold text-gray-900 leading-snug mb-2 line-clamp-2 group-hover:text-blue-700 transition-colors"
+    >
+      {{ article.title }}
+    </h3>
+
+    <!-- Description -->
+    @if (article.description) {
+      <p class="text-sm text-gray-600 leading-relaxed line-clamp-3 mb-4 flex-1">
+        {{ article.description }}
+      </p>
+    }
+
+    <!-- Footer -->
+    <div class="flex items-center justify-between mt-auto pt-3 border-t border-gray-100">
+      @if (article.author) {
+        <span class="text-xs text-gray-500 truncate max-w-[70%]"> By {{ article.author }} </span>
+      }
+      <span
+        class="inline-flex items-center gap-1 text-xs font-medium text-blue-600 group-hover:text-blue-700 transition-colors ml-auto"
+      >
+        Read more
+        <svg
+          class="w-3.5 h-3.5 transition-transform group-hover:translate-x-0.5"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+        </svg>
+      </span>
+    </div>
+  </div>
+</article>

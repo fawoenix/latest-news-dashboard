@@ -1,0 +1,11 @@
+@import 'tailwindcss';
+
+/* Global styles for the Latest News Dashboard */
+
+body {
+  font-family:
+    'Inter',
+    system-ui,
+    -apple-system,
+    sans-serif;
+}
