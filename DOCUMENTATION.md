@@ -161,7 +161,7 @@ The Latest News Dashboard is a production-ready full-stack web application that 
 #### Step 2: Clone Repository
 
 ```bash
-git clone <YOUR_REPOSITORY_URL>
+git clone https://github.com/fawoenix/latest-news-dashboard.git
 cd news-dashboard
 ```
 
