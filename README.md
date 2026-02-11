@@ -1,425 +1,226 @@
-# 📰 Latest News Dashboard
+# Latest News Dashboard
 
-A production-grade full-stack news aggregation platform that fetches, stores, caches, and displays articles from [NewsAPI](https://newsapi.org/).
+A full-stack web application that fetches, stores, caches, and displays news articles from NewsAPI.
 
----
+## Overview
 
-## 1. System Overview
+This project demonstrates a scalable news aggregation system with:
+- Real-time news fetching from NewsAPI
+- PostgreSQL database with optimized indexing
+- Redis caching layer for performance
+- Celery background tasks for automated updates
+- RESTful API with filtering and search
+- Responsive Angular frontend
 
-The application provides:
+## Tech Stack
 
-* Periodic news ingestion from NewsAPI
-* Deduplicated storage in PostgreSQL
-* RESTful APIs with filtering, search, and pagination
-* Redis-backed caching
-* Asynchronous background processing via Celery
-* Interactive API documentation (Swagger & ReDoc)
-* Angular-based responsive frontend
+- **Backend:** Django 4.x, Django REST Framework
+- **Frontend:** Angular 19+
+- **Database:** PostgreSQL 14+
+- **Cache:** Redis 7+
+- **Task Queue:** Celery + Celery Beat
+- **API Documentation:** Swagger (drf-yasg)
 
----
+## Prerequisites
 
-## 2. Architecture
+Ensure you have the following installed on Windows:
 
-```
-Angular (localhost:4200)
-        │
-        ▼
-Django REST API (localhost:8000)
-        │
-        ├── PostgreSQL (Primary Database)
-        ├── Redis (Cache Layer)
-        └── Redis (Celery Broker)
-                │
-                ▼
-        Celery Worker + Celery Beat
-```
+- Python 3.10+
+- Node.js 18+
+- PostgreSQL 14+
+- Redis (via WSL)
+- Git
 
-### Architectural Responsibilities
+## Quick Start
 
-| Component   | Responsibility                 |
-| ----------- | ------------------------------ |
-| Angular     | UI rendering & API consumption |
-| Django REST | API layer, business logic      |
-| PostgreSQL  | Persistent storage             |
-| Redis       | Caching + task broker          |
-| Celery      | Background task processing     |
-
----
-
-## 3. Technology Stack
-
-| Layer            | Technology                     |
-| ---------------- | ------------------------------ |
-| Frontend         | Angular                        |
-| Backend          | Django + Django REST Framework |
-| Database         | PostgreSQL                     |
-| Caching          | Redis                          |
-| Async Processing | Celery + Celery Beat           |
-| API Docs         | drf-yasg (Swagger)             |
-
----
-
-## 4. Prerequisites
-
-| Tool        | Version |
-| ----------- | ------- |
-| Python      | 3.10+   |
-| Node.js     | 18+     |
-| PostgreSQL  | 14+     |
-| Redis       | 7+      |
-| Angular CLI | 19+     |
-
----
-
-## 5. Installation
-
-### 5.1 Clone Repository
+### 1. Clone Repository
 
 ```bash
 git clone <REPOSITORY_URL>
-cd <PROJECT_ROOT>
+cd news-dashboard
 ```
 
----
+### 2. Setup PostgreSQL
 
-### 5.2 Database Setup (PostgreSQL)
+```bash
+psql -U postgres
+```
 
 ```sql
 CREATE USER news_user WITH PASSWORD 'secure_password';
 CREATE DATABASE news_dashboard OWNER news_user;
+\q
 ```
 
----
-
-### 5.3 Redis Setup
-
-Linux/macOS:
+### 3. Setup Redis (WSL)
 
 ```bash
+wsl --install
+# After restart, open WSL:
+sudo apt update
 sudo apt install redis-server
-sudo systemctl start redis
-redis-cli ping
+sudo service redis-server start
 ```
 
-Expected output:
-
-```
-PONG
-```
-
-Windows: Use WSL.
-
----
-
-## 6. Backend Setup (Django)
-
-### 6.1 Virtual Environment
+### 4. Backend Setup
 
 ```bash
+# Create and activate virtual environment
 python -m venv venv
-```
-
-Activate:
-
-Windows:
-
-```powershell
 .\venv\Scripts\Activate.ps1
-```
 
-Linux/macOS:
-
-```bash
-source venv/bin/activate
-```
-
----
-
-### 6.2 Install Dependencies
-
-```bash
+# Install dependencies
 pip install -r requirements.txt
-```
 
-If missing:
+# Create .env file in backend/ directory
+# Copy contents from .env.example and update values
 
-```bash
-pip install django djangorestframework psycopg2-binary django-redis requests django-cors-headers celery redis drf-yasg python-dotenv
-```
-
----
-
-### 6.3 Environment Configuration
-
-Create `backend/.env`:
-
-```env
-NEWS_API_KEY=your_newsapi_key_here
-
-DB_NAME=news_dashboard
-DB_USER=news_user
-DB_PASSWORD=secure_password
-DB_HOST=localhost
-DB_PORT=5432
-
-REDIS_URL=redis://127.0.0.1:6379/1
-CELERY_BROKER_URL=redis://127.0.0.1:6379/0
-```
-
-Ensure:
-
-* `.env` is excluded from version control
-* `.env.example` is provided
-
----
-
-### 6.4 Apply Migrations
-
-```bash
+# Run migrations
 cd backend
 python manage.py migrate
-```
 
----
-
-### 6.5 Initial Data Fetch
-
-```bash
+# Fetch initial data
 python manage.py fetch_news --all-categories
-```
 
----
-
-### 6.6 Start Backend
-
-```bash
+# Start server
 python manage.py runserver
 ```
 
-API base URL:
+Backend runs at: http://127.0.0.1:8000
 
-```
-http://127.0.0.1:8000
-```
-
----
-
-## 7. Frontend Setup (Angular)
+### 5. Frontend Setup
 
 ```bash
+# In a new terminal
 cd frontend
 npm install
 npx ng serve
 ```
 
-Frontend:
+Frontend runs at: http://localhost:4200
 
-```
-http://localhost:4200
-```
+## Running the Application
 
----
+### Minimum Required Services
 
-## 8. Running the System
-
-Start in the following order:
-
-1. Redis
-2. Django backend
-3. Celery worker
-4. Celery beat
-5. Angular frontend
-
----
-
-## 9. Background Tasks (Celery)
-
-Worker:
-
+**Terminal 1 - Redis (WSL):**
 ```bash
-celery -A backend worker --loglevel=info
+wsl
+sudo service redis-server start
 ```
 
-Scheduler:
-
+**Terminal 2 - Django Backend:**
 ```bash
-celery -A backend beat --loglevel=info
-```
-
-Celery Beat automatically triggers periodic news ingestion.
-
----
-
-## 10. API Documentation
-
-| Tool    | URL                                                              |
-| ------- | ---------------------------------------------------------------- |
-| Swagger | [http://127.0.0.1:8000/swagger/](http://127.0.0.1:8000/swagger/) |
-| ReDoc   | [http://127.0.0.1:8000/redoc/](http://127.0.0.1:8000/redoc/)     |
-
----
-
-## 11. API Endpoints
-
-### Articles
-
-```
-GET /api/news/articles/
-```
-
-Query parameters:
-
-* `page`
-* `category`
-* `source`
-* `country`
-* `search`
-
-Example:
-
-```bash
-curl "http://127.0.0.1:8000/api/news/articles/?search=AI"
-```
-
----
-
-### Categories
-
-```
-GET /api/news/categories/
-```
-
----
-
-### Sources
-
-```
-GET /api/news/sources/
-```
-
----
-
-### Manual Fetch
-
-```
-POST /api/news/fetch/
-```
-
-Example body:
-
-```json
-{
-  "category": "technology",
-  "country": "us",
-  "query": "AI"
-}
-```
-
----
-
-## 12. Database Design & Optimization
-
-### Indexing Strategy
-
-* B-tree index on `published_at`
-* Composite index `(category, published_at)`
-* Composite index `(source, published_at)`
-* GIN trigram index for full-text search
-* Unique constraint on `url`
-
-### Partitioning Strategy
-
-Range partitioning for archival of historical articles.
-
----
-
-## 13. Caching Strategy
-
-| Resource   | TTL        |
-| ---------- | ---------- |
-| Articles   | 10 minutes |
-| Categories | 15 minutes |
-| Sources    | 15 minutes |
-
-Clear cache:
-
-```bash
-python manage.py shell
-```
-
-```python
-from django.core.cache import cache
-cache.clear()
-exit()
-```
-
----
-
-## 14. Project Structure
-
-```
-backend/
-│
-├── backend/
-│   ├── settings.py
-│   ├── urls.py
-│   └── celery.py
-│
-├── news/
-│   ├── models.py
-│   ├── serializers.py
-│   ├── views.py
-│   ├── services.py
-│   └── tasks.py
-│
-└── manage.py
-
-frontend/
-└── src/app/
-    ├── components/
-    └── services/
-```
-
----
-
-## 15. Troubleshooting
-
-### Backend Unreachable
-
-```bash
+cd backend
+.\venv\Scripts\Activate.ps1
 python manage.py runserver
-curl http://127.0.0.1:8000/api/news/articles/
 ```
 
----
-
-### Angular Not Recognized
-
+**Terminal 3 - Angular Frontend:**
 ```bash
+cd frontend
 npx ng serve
 ```
 
----
+### Optional: Background Tasks (Celery)
 
-### Articles Not Updating
+**Terminal 4 - Celery Worker:**
+```bash
+cd backend
+.\venv\Scripts\Activate.ps1
+celery -A backend worker --loglevel=info --pool=solo
+```
 
-* Verify Celery worker is running
-* Verify Redis is active
-* Clear cache
+**Terminal 5 - Celery Beat:**
+```bash
+cd backend
+.\venv\Scripts\Activate.ps1
+celery -A backend beat --loglevel=info
+```
 
----
+## API Documentation
 
-## 16. Submission Checklist
+Access interactive API documentation:
+- Swagger UI: http://127.0.0.1:8000/swagger/
+- ReDoc: http://127.0.0.1:8000/redoc/
 
-* `.env` excluded from version control
-* `.env.example` included
-* README complete and reproducible
-* Swagger accessible
-* Application runs end-to-end
-* Code structured and documented
+## Project Structure
 
----
+```
+news-dashboard/
+├── backend/
+│   ├── backend/          # Django project settings
+│   ├── news/             # News app (models, views, serializers)
+│   ├── manage.py
+│   ├── requirements.txt
+│   └── .env
+├── frontend/
+│   ├── src/app/
+│   ├── package.json
+│   └── angular.json
+├── README.md
+└── DOCUMENTATION.md
+```
+
+## Environment Variables
+
+Create a `.env` file in the `backend/` directory:
+
+```env
+NEWS_API_KEY=your_newsapi_key_here
+DB_NAME=news_dashboard
+DB_USER=news_user
+DB_PASSWORD=secure_password
+DB_HOST=localhost
+DB_PORT=5432
+REDIS_URL=redis://127.0.0.1:6379/1
+CELERY_BROKER_URL=redis://127.0.0.1:6379/0
+```
+
+## Common Issues
+
+### Virtual Environment Activation Error (PowerShell)
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
+
+### Port Already in Use
+```powershell
+netstat -ano | findstr :8000
+taskkill /PID <PID_NUMBER> /F
+```
+
+### Redis Not Starting
+```bash
+wsl
+sudo service redis-server restart
+redis-cli ping
+```
+
+## Testing
+
+Run backend tests:
+```bash
+cd backend
+python manage.py test
+```
+
+## Documentation
+
+For detailed documentation, see [DOCUMENTATION.md](DOCUMENTATION.md)
+
+Includes:
+- Complete setup guide
+- Database configuration and optimization
+- Caching strategy
+- API endpoints reference
+- Architecture details
+- Troubleshooting guide
 
 ## Author
 
 **Lamia Ben Salem**
+
+## License
+
+This project is licensed under the MIT License.
